@@ -237,7 +237,8 @@ class DualSimulationManager:
                     conn_fixed.simulationStep()
                     
                     # --- RL STEP ---
-                    rl_step_metrics = {'waiting_time': 0, 'queue_length': 0}
+                    rl_arrived = conn_rl.simulation.getArrivedNumber()
+                    rl_step_metrics = {'waiting_time': 0, 'queue_length': 0, 'throughput': rl_arrived}
                     for agent in rl_agents:
                         m = agent.step(step)
                         rl_step_metrics['waiting_time'] += m.get('waiting_time', 0)
@@ -245,7 +246,8 @@ class DualSimulationManager:
                     self.rl_metrics.append(rl_step_metrics)
                     
                     # --- FIXED STEP ---
-                    fixed_step_metrics = {'waiting_time': 0, 'queue_length': 0}
+                    fixed_arrived = conn_fixed.simulation.getArrivedNumber()
+                    fixed_step_metrics = {'waiting_time': 0, 'queue_length': 0, 'throughput': fixed_arrived}
                     for agent in fixed_agents:
                         m = agent.step(step)
                         fixed_step_metrics['waiting_time'] += m.get('waiting_time', 0)
@@ -387,32 +389,43 @@ class DualSimulationManager:
         
         rl_queue = [m['queue_length'] for m in self.rl_metrics]
         fixed_queue = [m['queue_length'] for m in self.fixed_metrics]
+
+        # Calculate Throughput (Total Arrived)
+        rl_throughput = sum([m.get('throughput', 0) for m in self.rl_metrics])
+        fixed_throughput = sum([m.get('throughput', 0) for m in self.fixed_metrics])
         
         # Calculate improvements
         avg_wait_improvement = (
             (np.mean(fixed_waiting) - np.mean(rl_waiting)) / np.mean(fixed_waiting) * 100
-        )
+        ) if np.mean(fixed_waiting) > 0 else 0
         
         avg_queue_improvement = (
             (np.mean(fixed_queue) - np.mean(rl_queue)) / np.mean(fixed_queue) * 100
-        )
+        ) if np.mean(fixed_queue) > 0 else 0
+
+        throughput_improvement = (
+            (rl_throughput - fixed_throughput) / fixed_throughput * 100
+        ) if fixed_throughput > 0 else 0
         
         return {
             'rl': {
                 'avg_waiting_time': float(np.mean(rl_waiting)),
                 'avg_queue_length': float(np.mean(rl_queue)),
                 'max_waiting_time': float(np.max(rl_waiting)),
-                'max_queue_length': float(np.max(rl_queue))
+                'max_queue_length': float(np.max(rl_queue)),
+                'total_throughput': int(rl_throughput)
             },
             'fixed': {
                 'avg_waiting_time': float(np.mean(fixed_waiting)),
                 'avg_queue_length': float(np.mean(fixed_queue)),
                 'max_waiting_time': float(np.max(fixed_waiting)),
-                'max_queue_length': float(np.max(fixed_queue))
+                'max_queue_length': float(np.max(fixed_queue)),
+                'total_throughput': int(fixed_throughput)
             },
             'improvement': {
                 'waiting_time_reduction': float(avg_wait_improvement),
-                'queue_length_reduction': float(avg_queue_improvement)
+                'queue_length_reduction': float(avg_queue_improvement),
+                'throughput_increase': float(throughput_improvement)
             },
             'time_series': {
                 'rl_waiting': rl_waiting[::10],  # Downsample for efficiency

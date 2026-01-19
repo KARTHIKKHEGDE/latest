@@ -10,7 +10,7 @@ import sys
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from backend.core.dual_simulation_manager import DualSimulationManager
+from core.dual_simulation_manager import DualSimulationManager
 
 router = APIRouter()
 
