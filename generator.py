@@ -7,7 +7,7 @@ class TrafficGenerator:
         self._n_cars_generated = n_cars_generated  # how many cars per episode
         self._max_steps = max_steps
 
-    def generate_routefile(self, seed):
+    def generate_routefile(self, seed, output_path=None):
         """
         Generation of the route of every car for one episode
         """
@@ -29,7 +29,11 @@ class TrafficGenerator:
         car_gen_steps = np.rint(car_gen_steps)  # round every value to int -> effective steps when a car will be generated
 
         # produce the file for cars generation, one car per line
-        route_file_path = os.path.join(os.path.dirname(__file__), "intersection", "episode_routes.rou.xml")
+        if output_path:
+            route_file_path = output_path
+        else:
+            route_file_path = os.path.join(os.path.dirname(__file__), "intersection", "episode_routes.rou.xml")
+            
         with open(route_file_path, "w") as routes:
             print("""<routes>
             <vType accel="1.0" decel="4.5" id="standard_car" length="5.0" minGap="2.5" maxSpeed="25" sigma="0.5" />

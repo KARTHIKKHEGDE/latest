@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import time
 import threading
 import queue
+import subprocess
 
 # Add parent directory to import traffic generator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -42,17 +43,6 @@ class DualSimulationManager:
     ):
         """
         Initialize dual simulation manager.
-        
-        Args:
-            network_path: Path to SUMO network directory
-            model_path: Path to trained RL model
-            max_steps: Maximum simulation steps
-            n_cars: Number of cars to generate
-            green_duration_rl: Green duration for RL agent
-            green_duration_fixed: Green duration for fixed-time controller
-            yellow_duration: Yellow phase duration
-            gui: Whether to show SUMO GUI
-            seed: Random seed for reproducibility
         """
         self.network_path = network_path
         self.model_path = model_path
@@ -64,158 +54,193 @@ class DualSimulationManager:
         self.gui = gui
         self.seed = seed
         
-        self.emergency_interval = 120  # Spawn one ambulance every 2 minutes (120 seconds)
+        # Safer Scenario Detection - User Suggested
+        network_name = os.path.basename(self.network_path.lower())
+        if "single" in network_name or "intersection" in network_name:
+            self.scenario_id = "single"
+        elif "grid" in network_name:
+            self.scenario_id = "grid"
+        else:
+            self.scenario_id = "city" # Bangalore, etc.
         
-        # SUMO configuration - Try to find SUMO binary
+        self.emergency_interval = 120
+        
+        # SUMO configuration
         self.sumo_binary = self._find_sumo_binary(gui)
-        print(f"Using SUMO binary: {self.sumo_binary}")
         
-        # Traffic generator
-        self.traffic_gen = TrafficGenerator(
-            max_steps=max_steps,
-            n_cars_generated=n_cars
-        )
+        # Determine traffic density - User Req: "make it 2x not 100x"
+        # 2x traffic for Fixed Window only in single/grid scenarios
+        is_dual_density_scenario = self.scenario_id in ["single", "grid"]
+        fixed_n_cars = n_cars * 2 if is_dual_density_scenario else n_cars
+        
+        # Traffic generators (Lazy init)
+        self.traffic_gen_rl = TrafficGenerator(max_steps=max_steps, n_cars_generated=n_cars)
+        self.traffic_gen_fixed = TrafficGenerator(max_steps=max_steps, n_cars_generated=fixed_n_cars) 
         
         # Simulation state
         self.is_running = False
         self.current_step = 0
         
-        # Controllers (initialized when simulation starts)
+        # Controllers
         self.rl_agent: Optional[RLAgent] = None
         self.fixed_controller: Optional[FixedTimeController] = None
+        
+        # Config paths
+        self.sumocfg_rl = os.path.join(self.network_path, "sumo_config_rl.sumocfg")
+        self.sumocfg_fixed = os.path.join(self.network_path, "sumo_config_fixed.sumocfg")
         
         # Metrics storage
         self.rl_metrics = []
         self.fixed_metrics = []
-        
-        # Real-time data queue for WebSocket streaming
         self.data_queue = queue.Queue()
-        
-        # Track spawned emergency vehicles to prevent duplicates
         self.spawned_emergency_steps = set()
-    
+
     def _find_sumo_binary(self, gui: bool) -> str:
-        """
-        Find SUMO binary in system PATH or common installation locations.
-        """
+        """Find SUMO binary"""
         import shutil
-        
         binary_name = "sumo-gui" if gui else "sumo"
-        
-        # First, try to find in PATH
         sumo_path = shutil.which(binary_name)
-        if sumo_path:
-            return binary_name
+        if sumo_path: return binary_name
         
-        # Try common Windows installation paths
         common_paths = [
             r"C:\Program Files (x86)\Eclipse\Sumo\bin",
             r"C:\Program Files\Eclipse\Sumo\bin",
             r"C:\Sumo\bin",
             os.path.join(os.environ.get("SUMO_HOME", ""), "bin")
         ]
-        
         for path in common_paths:
-            if not path:
-                continue
+            if not path: continue
             full_path = os.path.join(path, f"{binary_name}.exe")
-            if os.path.exists(full_path):
-                return full_path
-        
+            if os.path.exists(full_path): return full_path
         return binary_name
 
     def _spawn_emergency_vehicle(self, step, conn_rl, conn_fixed):
-        """
-        Spawn an emergency vehicle in both simulations at the same random location.
-        Includes duplicate prevention to ensure only one spawn per interval.
-        """
+        """Spawn emergency vehicle in both simulations"""
         import random
-        
-        # Prevent duplicate spawning at the same step
-        if step in self.spawned_emergency_steps:
-            print(f"  ⚠️  [Step {step}] Duplicate spawn prevented (already spawned at this step)")
-            return
-        
+        if step in self.spawned_emergency_steps: return
         self.spawned_emergency_steps.add(step)
         
-        # Calculate time in minutes for better readability
-        time_minutes = step / 60.0
-        
         try:
-            # Pick a random route from available routes
             routes = conn_rl.route.getIDList()
-            # Filter out internal/invalid routes (often start with !)
             routes = [r for r in routes if not r.startswith("!")]
-            
             if not routes: return
             
             route_id = random.choice(routes)
             veh_id = f"ambulance_{step}"
             
-            print(f"\n  🚑 [Step {step} | {time_minutes:.1f} min] Spawning Emergency Vehicle")
-            print(f"     Vehicle ID: {veh_id}")
-            print(f"     Route: {route_id}")
-            print(f"     Next spawn in: {self.emergency_interval} steps (2 minutes)")
-            
-            # Spawn in RL simulation
+            # RL
             try:
                 conn_rl.vehicle.add(veh_id, route_id, typeID="emergency", departSpeed="max")
                 conn_rl.vehicle.setColor(veh_id, (255, 0, 0, 255))
-                print(f"     ✓ Spawned in RL simulation")
-            except Exception as e:
-                print(f"     ⚠️  Warning: Failed to spawn in RL: {e}")
-                pass
+            except: pass
                 
-            # Spawn in Fixed simulation
+            # Fixed
             try:
                 conn_fixed.vehicle.add(veh_id, route_id, typeID="emergency", departSpeed="max")
                 conn_fixed.vehicle.setColor(veh_id, (255, 0, 0, 255))
-                print(f"     ✓ Spawned in Fixed simulation")
-            except Exception as e:
-                print(f"     ⚠️  Warning: Failed to spawn in Fixed: {e}")
-                pass
+            except: pass
                 
         except Exception as e:
-            print(f"  ❌ Error spawning emergency vehicle: {e}")
+            print(f"Error spawning emergency: {e}")
+
+    
+    def _create_config_file(self, config_path, net_file, route_file):
+        """Helper to create SUMO config file"""
+        content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+    <input>
+        <net-file value="{net_file}"/>
+        <route-files value="{route_file}"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="{self.max_steps}"/>
+        <step-length value="1.0"/>
+    </time>
+    <processing>
+        <time-to-teleport value="-1"/>
+        <waiting-time-memory value="10000"/>
+        <collision.action value="none"/>
+    </processing>
+    <report>
+        <verbose value="true"/>
+        <no-step-log value="false"/>
+    </report>
+</configuration>
+"""
+        with open(config_path, "w") as f:
+            f.write(content)
 
     def initialize(self):
         """
         Initialize simulation environment and controllers.
+        Handles differential traffic generation for Single/Grid.
         """
-        # Generate route file with same seed for both simulations
-        route_file = os.path.join(self.network_path, "episode_routes.rou.xml")
-        self.traffic_gen.generate_routefile(seed=self.seed)
+        print(f"Initializing for Scenario: {self.scenario_id}")
         
-        # Move generated route file to network directory
-        src_route = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "intersection",
-            "episode_routes.rou.xml"
-        )
-        if os.path.exists(src_route):
-            try:
-                import shutil
-                shutil.copy(src_route, route_file)
-            except Exception as e:
-                print(f"Warning: Could not copy route file: {e}")
+        # Defaults
+        net_file = [f for f in os.listdir(self.network_path) if f.endswith('.net.xml')][0]
+        
+        if self.scenario_id == "single":
+            # SINGLE: Use TrafficGenerator
+            route_file_rl = "episode_routes_rl.rou.xml"
+            route_file_fixed = "episode_routes_fixed.rou.xml"
+            
+            # Generate Normal Traffic for RL
+            self.traffic_gen_rl.generate_routefile(seed=self.seed, output_path=os.path.join(self.network_path, route_file_rl))
+            
+            # Generate 2x Traffic for Fixed
+            self.traffic_gen_fixed.generate_routefile(seed=self.seed, output_path=os.path.join(self.network_path, route_file_fixed))
+            
+            # Create configs
+            self._create_config_file(self.sumocfg_rl, net_file, route_file_rl)
+            self._create_config_file(self.sumocfg_fixed, net_file, route_file_fixed)
+            
+        elif self.scenario_id == "grid":
+            # GRID: Use randomTrips (TrafficGenerator doesn't support grid topology)
+            # Assuming grid folder has trips.trips.xml or we generate valid flow
+            # We will use randomTrips.py if available to generate routes
+            
+            route_file_rl = "episode_routes_rl.rou.xml"
+            route_file_fixed = "episode_routes_fixed.rou.xml"
+            
+            sumo_home = os.environ.get("SUMO_HOME")
+            random_trips = os.path.join(sumo_home, "tools", "randomTrips.py") if sumo_home else None
+            
+            if random_trips and os.path.exists(random_trips):
+                # Generate RL (Standard Density) - e.g. period 2.0
+                cmd_rl = [sys.executable, random_trips, "-n", os.path.join(self.network_path, net_file), "-r", os.path.join(self.network_path, "episode_routes_rl.rou.xml"), "-e", str(self.max_steps), "-p", "2.0", "--seed", str(self.seed), "--fringe-start-attributes", "departSpeed=\"max\""]
+                subprocess.run(cmd_rl, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-        # Copy emergency config if needed (handled by create scripts now)
+                # Generate Fixed (2x Density) - period 2.0 / 2 = 1.0
+                cmd_fixed = [sys.executable, random_trips, "-n", os.path.join(self.network_path, net_file), "-r", os.path.join(self.network_path, "episode_routes_fixed.rou.xml"), "-e", str(self.max_steps), "-p", "1.0", "--seed", str(self.seed), "--fringe-start-attributes", "departSpeed=\"max\""]
+                subprocess.run(cmd_fixed, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                # Fallback if tools missing: Copy existing to both
+                print("Warning: randomTrips not found, using default routes for Grid")
+                default_route = os.path.join(self.network_path, "routes.rou.xml")
+                if os.path.exists(default_route):
+                     import shutil
+                     shutil.copy(default_route, os.path.join(self.network_path, route_file_rl))
+                     shutil.copy(default_route, os.path.join(self.network_path, route_file_fixed))
 
-        # Start SUMO
-        sumocfg = os.path.join(self.network_path, "sumo_config.sumocfg")
-        
-        self.sumo_cmd = [
-            self.sumo_binary,
-            "-c", sumocfg,
-            "--no-step-log", "true",
-            "--waiting-time-memory", "10000",
-            "--time-to-teleport", "-1",
-            "--seed", str(self.seed),
-            "--start"
-        ]
-        
-        print("✓ Simulation manager configured")
-        print(f"  Network: {self.network_path}")
+            # Create Configs
+            self._create_config_file(self.sumocfg_rl, net_file, route_file_rl)
+            self._create_config_file(self.sumocfg_fixed, net_file, route_file_fixed)
+            
+        else:
+            # OTHER SCENARIOS (Bangalore, etc.) - Use shared config/routes for now
+            # Unless specified otherwise, we use same routes
+            route_file = "episode_routes.rou.xml"
+            self.sumocfg_rl = os.path.join(self.network_path, "sumo_config.sumocfg")
+            self.sumocfg_fixed = self.sumocfg_rl
+            
+            # Just ensure setup is correct (usually handled by setup scripts)
+            # Maybe recreate config just in case?
+            # self._create_config_file(self.sumocfg_rl, net_file, route_file)
+            pass
+
+        print("✓ Simulation manager configured (Dual Density Activated for supported maps)")
         
     
     def run_simulation(self, strategy: str = "both") -> Dict:
@@ -229,10 +254,15 @@ class DualSimulationManager:
         self.fixed_metrics = []
         self.spawned_emergency_steps.clear()  # Reset emergency vehicle tracking
         
+        # Define Commands
+        cmd_rl = [self.sumo_binary, "-c", self.sumocfg_rl, "--start"]
+        cmd_fixed = [self.sumo_binary, "-c", self.sumocfg_fixed, "--start"]
+        
         # --- PARELLEL EXECUTION (Both Windows Simultaneously) ---
         if strategy == "both":
             print("\n🚦 Starting Dual-Window Parallel Simulation...")
-            print("  Window 1 (RL Agent) | Window 2 (Fixed-Time Controller)")
+            print(f"  RL Config: {os.path.basename(self.sumocfg_rl)}")
+            print(f"  Fixed Config: {os.path.basename(self.sumocfg_fixed)}")
             
             # Force Cleanup & Restart logic (No early return)
             try:
@@ -242,9 +272,14 @@ class DualSimulationManager:
                 try: traci.getConnection("Fixed").close()
                 except: pass
                 
-                # Start both SUMO instances with unique labels
-                traci.start(self.sumo_cmd, label="RL")
-                traci.start(self.sumo_cmd, label="Fixed")
+                # Start both SUMO instances with unique labels and explicit ports
+                # User/System Req: Use unique ports to avoid 'Connection closed' race conditions on Windows
+                traci.start(cmd_rl + ["--no-warnings", "true"], label="RL", port=8813)
+                
+                # Small delay to ensure first process binds port before second starts
+                time.sleep(1.0)
+                
+                traci.start(cmd_fixed + ["--no-warnings", "true"], label="Fixed", port=8814)
                 
                 # Set Running Flag AFTER successful start
                 self.is_running = True
