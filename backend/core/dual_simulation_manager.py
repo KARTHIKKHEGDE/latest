@@ -56,12 +56,18 @@ class DualSimulationManager:
         
         # Safer Scenario Detection - User Suggested
         network_name = os.path.basename(self.network_path.lower())
-        if "single" in network_name or "intersection" in network_name:
+        if "hosmat" in network_name:
+            self.scenario_id = "hosmat"
+            self.scenario_mode = "TRAFFIC_COMPARISON"
+        elif "single" in network_name or "intersection" in network_name:
             self.scenario_id = "single"
+            self.scenario_mode = "CONTROL_COMPARISON"
         elif "grid" in network_name:
             self.scenario_id = "grid"
+            self.scenario_mode = "CONTROL_COMPARISON"
         else:
             self.scenario_id = "city" # Bangalore, etc.
+            self.scenario_mode = "CONTROL_COMPARISON"
         
         self.emergency_interval = 120
         
@@ -144,13 +150,15 @@ class DualSimulationManager:
             print(f"Error spawning emergency: {e}")
 
     
-    def _create_config_file(self, config_path, net_file, route_file):
+    def _create_config_file(self, config_path, net_file, route_file, additional_file=None):
         """Helper to create SUMO config file"""
+        additional_input = f'        <additional-files value="{additional_file}"/>' if additional_file else ""
         content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
     <input>
         <net-file value="{net_file}"/>
         <route-files value="{route_file}"/>
+{additional_input}
     </input>
     <time>
         <begin value="0"/>
@@ -158,7 +166,7 @@ class DualSimulationManager:
         <step-length value="1.0"/>
     </time>
     <processing>
-        <time-to-teleport value="-1"/>
+        <time-to-teleport value="120"/>
         <waiting-time-memory value="10000"/>
         <collision.action value="none"/>
     </processing>
@@ -228,16 +236,35 @@ class DualSimulationManager:
             self._create_config_file(self.sumocfg_rl, net_file, route_file_rl)
             self._create_config_file(self.sumocfg_fixed, net_file, route_file_fixed)
             
+        elif self.scenario_id == "hosmat":
+            # HOSMAT: TRAFFIC STRESS COMPARISON (Light vs Heavy)
+            net_file = "hosmat.net.xml"
+            route_file_rl = "episode_routes_rl.rou.xml" # LIGHT
+            route_file_fixed = "episode_routes_fixed.rou.xml" # HEAVY
+            add_file = "emergency.add.xml" if "emergency.add.xml" in os.listdir(self.network_path) else None
+            
+            sumo_home = os.environ.get("SUMO_HOME")
+            random_trips = os.path.join(sumo_home, "tools", "randomTrips.py") if sumo_home else None
+            
+            if random_trips and os.path.exists(random_trips):
+                # Increased periods to avoid instant gridlock/stuck (User Req: "why is it stucked")
+                # Light Traffic (p=8.0)
+                cmd_light = [sys.executable, random_trips, "-n", os.path.join(self.network_path, net_file), "-r", os.path.join(self.network_path, route_file_rl), "-e", str(self.max_steps), "-p", "8.0", "--seed", str(self.seed), "--fringe-start-attributes", "departSpeed=\"max\""]
+                subprocess.run(cmd_light, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # Heavy Traffic (p=4.5)
+                cmd_heavy = [sys.executable, random_trips, "-n", os.path.join(self.network_path, net_file), "-r", os.path.join(self.network_path, route_file_fixed), "-e", str(self.max_steps), "-p", "4.5", "--seed", str(self.seed), "--fringe-start-attributes", "departSpeed=\"max\""]
+                subprocess.run(cmd_heavy, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Create Configs (Crucially including add_file for emergency vType)
+            self._create_config_file(self.sumocfg_rl, net_file, route_file_rl, add_file)
+            self._create_config_file(self.sumocfg_fixed, net_file, route_file_fixed, add_file)
+            
         else:
             # OTHER SCENARIOS (Bangalore, etc.) - Use shared config/routes for now
-            # Unless specified otherwise, we use same routes
             route_file = "episode_routes.rou.xml"
             self.sumocfg_rl = os.path.join(self.network_path, "sumo_config.sumocfg")
             self.sumocfg_fixed = self.sumocfg_rl
-            
-            # Just ensure setup is correct (usually handled by setup scripts)
-            # Maybe recreate config just in case?
-            # self._create_config_file(self.sumocfg_rl, net_file, route_file)
             pass
 
         print("✓ Simulation manager configured (Dual Density Activated for supported maps)")
@@ -296,16 +323,26 @@ class DualSimulationManager:
                 fixed_agents = []
                 
                 for tls_id in tls_ids:
-                    # RL Agents bound to RL connection
-                    rl_agents.append(RLAgent(
-                        tls_id=tls_id,
-                        model_path=self.model_path,
-                        connection=conn_rl,
-                        green_duration=self.green_duration_rl,
-                        yellow_duration=self.yellow_duration
-                    ))
+                    # Determine which agent to use for the "RL" window
+                    if self.scenario_mode == "TRAFFIC_COMPARISON":
+                        # For HOSMAT, "RL" window is actually Light Traffic (p=5.5) + Fixed-Time Control
+                        rl_agents.append(FixedTimeController(
+                            tls_id=tls_id,
+                            connection=conn_rl,
+                            green_duration=self.green_duration_fixed,
+                            yellow_duration=self.yellow_duration
+                        ))
+                    else:
+                        # Normal mode: RL Window uses RLAgent
+                        rl_agents.append(RLAgent(
+                            tls_id=tls_id,
+                            model_path=self.model_path,
+                            connection=conn_rl,
+                            green_duration=self.green_duration_rl,
+                            yellow_duration=self.yellow_duration
+                        ))
                     
-                    # Fixed Agents bound to Fixed connection
+                    # Fixed Window always uses FixedTimeController
                     fixed_agents.append(FixedTimeController(
                         tls_id=tls_id,
                         connection=conn_fixed,
