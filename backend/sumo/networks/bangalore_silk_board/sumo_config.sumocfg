@@ -3,6 +3,7 @@
     <input>
         <net-file value="bangalore_silk_board.net.xml"/>
         <route-files value="routes.rou.xml"/>
+        <additional-files value="emergency.add.xml"/>
     </input>
     <time>
         <begin value="0"/>

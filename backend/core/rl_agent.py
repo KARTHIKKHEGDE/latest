@@ -80,6 +80,43 @@ class RLAgent:
         self._collect_waiting_times()
         self.queue_length = self._get_queue_length()
         
+        # --- EMERGENCY VEHICLE LOGIC ---
+        has_emergency, emergency_phase = self._check_emergency()
+        
+        if has_emergency:
+            # 🚑 Emergency Override: Force Green for the emergency lane immediately
+            # Bypass decision interval
+            if emergency_phase != self.current_phase:
+                # Need to switch
+                # If currently yellow, wait? Or force switch? 
+                # Standard safety says finish yellow, but for now we trust _set_yellow_phase to handle transition
+                if self.time_since_last_change >= self.yellow_duration:
+                     self._set_yellow_phase(self.current_phase)
+                     self.current_phase = emergency_phase
+                     self.metrics['phase_changes'] += 1
+                     self.time_since_last_change = 0
+            else:
+                 # Already in correct phase (or yellow going to it?)
+                 # Ensure we are green, not yellow
+                 if self.time_since_last_change >= self.yellow_duration:
+                     self._set_green_phase(self.current_phase)
+                 
+            # print(f"  🚑 Emergency Override: Forcing Phase {emergency_phase}")
+            
+            # Increment time but don't limit duration
+            self.time_since_last_change += 1
+            
+            return {
+                'tls_id': self.tls_id,
+                'current_phase': int(self.current_phase),
+                'waiting_time': float(self.avg_waiting_time),
+                'queue_length': int(self.queue_length),
+                'time_since_change': int(self.time_since_last_change),
+                'state': state.tolist(),
+                'emergency': True
+            }
+        # -------------------------------
+        
         # Make decision every green_duration + yellow_duration seconds
         decision_interval = self.green_duration + self.yellow_duration
         
@@ -123,6 +160,34 @@ class RLAgent:
             'time_since_change': int(self.time_since_last_change),
             'state': state.tolist()
         }
+
+    def _check_emergency(self) -> Tuple[bool, int]:
+        """
+        Check for emergency vehicles in incoming lanes and return the required phase.
+        Returns: (has_emergency, target_phase)
+        """
+        try:
+            controlled_lanes = self.connection.trafficlight.getControlledLanes(self.tls_id)
+            incoming_lanes = list(set(controlled_lanes))
+            
+            for lane_id in incoming_lanes:
+                vehicles = self.connection.lane.getLastStepVehicleIDs(lane_id)
+                for veh_id in vehicles:
+                    v_type = self.connection.vehicle.getTypeID(veh_id)
+                    if "emergency" in v_type:
+                        # Found emergency vehicle!
+                        # Determine required phase
+                        lane_group = self._get_lane_group(lane_id)
+                        
+                        if lane_group in [2, 6]: return True, self.PHASE_NS_GREEN
+                        if lane_group in [3, 7]: return True, self.PHASE_NSL_GREEN
+                        if lane_group in [0, 4]: return True, self.PHASE_EW_GREEN
+                        if lane_group in [1, 5]: return True, self.PHASE_EWL_GREEN
+                        
+        except Exception:
+            pass
+            
+        return False, -1
     
     def _choose_action(self, state: np.ndarray) -> int:
         """

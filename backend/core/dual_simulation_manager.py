@@ -64,6 +64,8 @@ class DualSimulationManager:
         self.gui = gui
         self.seed = seed
         
+        self.emergency_interval = 30  # Configurable emergency interval
+        
         # SUMO configuration - Try to find SUMO binary
         self.sumo_binary = self._find_sumo_binary(gui)
         print(f"Using SUMO binary: {self.sumo_binary}")
@@ -117,12 +119,41 @@ class DualSimulationManager:
             if os.path.exists(full_path):
                 return full_path
         
-        # If not found, return the binary name and hope it's in PATH
-        print(f"⚠️  Warning: {binary_name} not found in common locations")
-        print("   Make sure SUMO is installed and added to your system PATH")
-        print("   Or set the SUMO_HOME environment variable")
         return binary_name
-        
+
+    def _spawn_emergency_vehicle(self, step, conn_rl, conn_fixed):
+        """
+        Spawn an emergency vehicle in both simulations at the same random location.
+        """
+        import random
+        try:
+            # Pick a random route from available routes
+            routes = conn_rl.route.getIDList()
+            if not routes: return
+            
+            route_id = random.choice(routes)
+            veh_id = f"ambulance_{step}"
+            
+            # Spawn in RL simulation
+            try:
+                conn_rl.vehicle.add(veh_id, route_id, typeID="emergency", departSpeed="max")
+                conn_rl.vehicle.setColor(veh_id, (255, 0, 0, 255))
+                # print(f"  🚑 Spawned Emergency Vehicle {veh_id} on route {route_id}")
+            except Exception as e:
+                # Type might not exist if using old config, fallback to standard
+                # print(f"Warning: Failed to spawn emergency in RL: {e}")
+                pass
+                
+            # Spawn in Fixed simulation
+            try:
+                conn_fixed.vehicle.add(veh_id, route_id, typeID="emergency", departSpeed="max")
+                conn_fixed.vehicle.setColor(veh_id, (255, 0, 0, 255))
+            except Exception as e:
+                pass
+                
+        except Exception as e:
+            print(f"Error spawning emergency vehicle: {e}")
+
     def initialize(self):
         """
         Initialize simulation environment and controllers.
@@ -143,6 +174,8 @@ class DualSimulationManager:
                 shutil.copy(src_route, route_file)
             except Exception as e:
                 print(f"Warning: Could not copy route file: {e}")
+                
+        # Copy emergency config if needed (handled by create scripts now)
 
         # Start SUMO
         sumocfg = os.path.join(self.network_path, "sumo_config.sumocfg")
@@ -157,10 +190,6 @@ class DualSimulationManager:
             "--start"
         ]
         
-        # Discover Traffic Lights
-        # We need to start TRACI momentarily to get IDs, then close? 
-        # Or just initialize lists and populate them inside run_simulation?
-        # Populating inside run_simulation is safer as TRACI connection is active then.
         print("✓ Simulation manager configured")
         print(f"  Network: {self.network_path}")
         
@@ -189,7 +218,6 @@ class DualSimulationManager:
                 except: pass
                 
                 # Start both SUMO instances with unique labels
-                print(f"DEBUG: Launching SUMO with cmd: {self.sumo_cmd}")
                 traci.start(self.sumo_cmd, label="RL")
                 traci.start(self.sumo_cmd, label="Fixed")
                 
@@ -235,6 +263,10 @@ class DualSimulationManager:
                     # Step both simulations
                     conn_rl.simulationStep()
                     conn_fixed.simulationStep()
+                    
+                    # Spawn Emergency Vehicle
+                    if step > 0 and step % self.emergency_interval == 0:
+                        self._spawn_emergency_vehicle(step, conn_rl, conn_fixed)
                     
                     # --- RL STEP ---
                     rl_arrived = conn_rl.simulation.getArrivedNumber()

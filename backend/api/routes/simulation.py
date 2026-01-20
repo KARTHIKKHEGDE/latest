@@ -25,6 +25,7 @@ class SimulationConfig(BaseModel):
     n_cars: int = 1000
     gui: bool = False
     seed: int = 42
+    emergency_interval: int = 30
 
 
 class SimulationControl(BaseModel):
@@ -70,6 +71,9 @@ async def initialize_simulation(config: SimulationConfig):
             gui=config.gui,
             seed=config.seed
         )
+        
+        # Set emergency interval
+        simulation_manager.emergency_interval = config.emergency_interval
         
         simulation_manager.initialize()
         

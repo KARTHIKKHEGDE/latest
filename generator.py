@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import os
 
 class TrafficGenerator:
     def __init__(self, max_steps, n_cars_generated):
@@ -28,9 +29,11 @@ class TrafficGenerator:
         car_gen_steps = np.rint(car_gen_steps)  # round every value to int -> effective steps when a car will be generated
 
         # produce the file for cars generation, one car per line
-        with open("intersection/episode_routes.rou.xml", "w") as routes:
+        route_file_path = os.path.join(os.path.dirname(__file__), "intersection", "episode_routes.rou.xml")
+        with open(route_file_path, "w") as routes:
             print("""<routes>
             <vType accel="1.0" decel="4.5" id="standard_car" length="5.0" minGap="2.5" maxSpeed="25" sigma="0.5" />
+            <vType id="emergency" vClass="emergency" guiShape="emergency" color="red" accel="2.0" decel="6.0" length="6.0" minGap="2.5" maxSpeed="35" speedFactor="1.5" sigma="0.0" />
 
             <route id="W_N" edges="W2TL TL2N"/>
             <route id="W_E" edges="W2TL TL2E"/>
