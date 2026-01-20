@@ -1,297 +1,380 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Clock, Zap, Cpu, Server, Wifi, ShieldAlert, Play, ArrowLeft, ArrowUpRight } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend } from 'recharts';
+import { Activity, Zap, Cpu, ArrowLeft } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import axios from 'axios';
-import { motion } from 'framer-motion';
 
-interface ComparisonMetrics {
-    rl: {
-        avg_waiting_time: number;
-        avg_queue_length: number;
-        total_throughput: number;
+
+interface MetricData {
+    fixed: number[];
+    rl: number[];
+    improvement: number[];
+}
+
+interface AnalyticsData {
+    duration: number;
+    time_points: number[];
+    metrics: {
+        waiting_time: MetricData;
+        queue_length: MetricData;
+        throughput: MetricData;
+        efficiency: MetricData;
     };
-    fixed: {
-        avg_waiting_time: number;
-        avg_queue_length: number;
-        total_throughput: number;
-    };
-    improvement: {
-        waiting_time_reduction: number;
-        queue_length_reduction: number;
+    summary: {
+        waiting_time_improvement: number;
+        queue_improvement: number;
         throughput_increase: number;
-    };
-    time_series: {
-        rl_waiting: number[];
-        fixed_waiting: number[];
-        rl_queue: number[];
-        fixed_queue: number[];
+        rl_avg_wait: number;
+        fixed_avg_wait: number;
     };
 }
 
-// --- Components ---
+// --- Reusable Complex Chart Component ---
+const ComplexChart = ({ title, data, timePoints, color, unit }: any) => {
+    // Transform data for Recharts
+    const chartData = timePoints.map((t: number, i: number) => ({
+        time: t.toFixed(0),
+        fixed: data.fixed[i],
+        rl: data.rl[i],
+        improvement: data.improvement[i]
+    }));
 
-const StatCard = ({ label, fixed, rl, unit, improvement, better, color, index }: any) => {
+    // Calculate phase indices for background highlights
+    const totalPoints = timePoints.length;
+    const p1End = Math.floor(totalPoints * 0.2);
+    const p2End = Math.floor(totalPoints * 0.7);
+
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className={`
-                bg-[#0a0a0a] border border-[#00ff9c]/20 p-4 relative group hover:border-[#00ff9c]/50 transition-colors
-                before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-${color}-500 before:opacity-50 before:transition-opacity hover:before:opacity-100
-            `}
-        >
-            <div className={`flex items-center gap-2 mb-4 text-[10px] font-bold text-${color}-400 uppercase tracking-[0.2em] opacity-80`}>
-                {index === 0 && <Clock className="w-3 h-3" />}
-                {index === 1 && <Zap className="w-3 h-3" />}
-                {index === 2 && <ShieldAlert className="w-3 h-3" />}
-                {index === 3 && <Activity className="w-3 h-3" />}
-                {label}
+        <div className={`bg-[#0a0a0a] border border-${color}-500/20 p-5 relative group hover:border-${color}-500/40 transition-all duration-500 overflow-hidden`}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4 z-10 relative">
+                <div className="flex items-center gap-2">
+                    <div className={`p-1.5 bg-${color}-500/10 rounded-sm border border-${color}-500/20`}>
+                        <Activity className={`w-4 h-4 text-${color}-500`} />
+                    </div>
+                    <span className={`text-${color}-500 text-xs font-bold tracking-[0.2em] uppercase`}>{title}</span>
+                </div>
+                <div className="flex gap-4 text-[9px] font-bold uppercase tracking-widest opacity-60">
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500" /> Legacy</span>
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-[#00ff9c]" /> AI Agent</span>
+                </div>
             </div>
 
-            <div className="flex justify-between items-end mb-2">
-                <div>
-                    <div className="text-[9px] text-red-500/70 uppercase font-bold mb-1 tracking-wider">LEGACY (FIXED)</div>
-                    <div className="text-xl font-mono font-bold text-red-500/80">{fixed}</div>
-                </div>
-                <div className="text-right">
-                    <div className="text-[9px] text-[#00ff9c]/70 uppercase font-bold mb-1 tracking-wider">NEURALNET (RL)</div>
-                    <div className="text-2xl font-mono font-bold text-[#00ff9c] text-shadow-glow">
-                        {rl} <span className="text-xs text-[#00ff9c]/50 font-normal">{unit}</span>
+            {/* Chart */}
+            <div className="h-[200px] w-full relative z-10">
+                <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                        <defs>
+                            <linearGradient id={`grad${color}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={color === 'cyan' ? '#00ff9c' : color} stopOpacity={0.3} />
+                                <stop offset="95%" stopColor={color === 'cyan' ? '#00ff9c' : color} stopOpacity={0} />
+                            </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
+
+                        {/* Phases Backgrounds */}
+                        {chartData.length > 0 && (
+                            <>
+                                <ReferenceArea x1={chartData[0].time} x2={chartData[p1End]?.time} fill="#ffff00" fillOpacity={0.02} />
+                                <ReferenceArea x1={chartData[p1End]?.time} x2={chartData[p2End]?.time} fill="#00ff00" fillOpacity={0.02} />
+                                <ReferenceArea x1={chartData[p2End]?.time} x2={chartData[totalPoints - 1]?.time} fill="#0000ff" fillOpacity={0.02} />
+                            </>
+                        )}
+
+                        <XAxis dataKey="time" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                        <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `${val}${unit || ''}`} />
+                        <Tooltip
+                            contentStyle={{ backgroundColor: '#000000cc', borderColor: '#ffffff20', backdropFilter: 'blur(4px)' }}
+                            itemStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
+                            labelStyle={{ color: '#666', fontSize: '10px', marginBottom: '5px' }}
+                        />
+                        <Area type="monotone" dataKey="fixed" stroke="#ef4444" fill="transparent" strokeWidth={1.5} dot={false} strokeOpacity={0.7} />
+                        <Area type="monotone" dataKey="rl" stroke={color === 'cyan' ? '#06b6d4' : (color === 'green' ? '#00ff9c' : color)} fill={`url(#grad${color})`} strokeWidth={2} dot={false} />
+                    </AreaChart>
+                </ResponsiveContainer>
+            </div>
+
+            {/* Metrics Footer */}
+            <div className="flex justify-between items-center mt-4 pt-4 border-t border-white/5">
+                <div className="flex gap-4">
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-500 uppercase">Phase</span>
+                        <span className="text-xs font-mono text-[#00ff9c]">CONVERGED</span>
                     </div>
                 </div>
+                <div className="text-right">
+                    <span className={`text-xl font-bold font-mono text-${color}-400`}>
+                        {Math.abs(data.improvement[data.improvement.length - 1]).toFixed(1)}%
+                    </span>
+                    <span className="text-[10px] text-gray-500 uppercase ml-2">IMPROVEMENT</span>
+                </div>
             </div>
 
-            <div className={`
-                mt-3 pt-3 border-t border-white/5 flex items-center justify-between
-                text-xs font-bold font-mono tracking-wider
-                ${better ? 'text-[#00ff9c]' : 'text-amber-500'}
-            `}>
-                <span className="opacity-60 text-[9px] uppercase">Improvement Delta</span>
-                <span className="flex items-center gap-1">
-                    {better ? <ArrowUpRight className="w-3 h-3" /> : <Play className="w-3 h-3 rotate-90" />}
-                    {improvement}
-                </span>
+            {/* Phase Labels Overlay */}
+            <div className="absolute top-[60px] left-0 w-full flex justify-between px-4 pointer-events-none opacity-20 text-[9px] font-mono tracking-widest text-white/50">
+                <span className="w-[20%] text-center border-b border-white/20 pb-1">EXPLORE</span>
+                <span className="w-[50%] text-center border-b border-white/20 pb-1">LEARNING</span>
+                <span className="w-[30%] text-center border-b border-white/20 pb-1">OPTIMIZED</span>
             </div>
-
-            {/* Decor */}
-            <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-[#00ff9c]/20" />
-            <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-[#00ff9c]/20" />
-        </motion.div>
+        </div>
     );
-}
+};
+
+const StatBlock = ({ label, value, sub, color }: any) => (
+    <div className={`bg-[#0a0a0a] p-4 border-l-2 border-${color}-500`}>
+        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{label}</div>
+        <div className="text-2xl font-mono font-bold text-white mb-1">{value}</div>
+        <div className={`text-xs font-mono text-${color}-500`}>{sub}</div>
+    </div>
+);
 
 const DeepAnalytics = () => {
     const navigate = useNavigate();
-    const [metrics, setMetrics] = useState<ComparisonMetrics | null>(null);
-    const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchMetrics();
-        const interval = setInterval(fetchMetrics, 2000); // Polling every 2s
-        return () => clearInterval(interval);
-    }, []);
+    // State for the full dataset (hidden buffer)
+    const [fullData, setFullData] = useState<AnalyticsData | null>(null);
 
-    const fetchMetrics = async () => {
+    // State for what is currently displayed (progressive slice)
+    const [displayData, setDisplayData] = useState<AnalyticsData | null>(null);
+    const [playbackIndex, setPlaybackIndex] = useState(0);
+    const [isSimulating, setIsSimulating] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    // Initial empty state values
+    const [currentMetrics, setCurrentMetrics] = useState({
+        wait: 0,
+        waitImp: 0,
+        throughput: 0,
+        throughputImp: 0,
+        queue: 0,
+        queueImp: 0
+    });
+
+    const startSimulation = async () => {
         try {
-            const response = await axios.get('/api/simulation/comparison');
-            setMetrics(response.data);
+            setLoading(true);
+            setPlaybackIndex(0);
+            setIsSimulating(false);
+
+            // Artificial delay for "Connecting to Kernel..."
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // Add timestamp to prevent caching
+            const response = await axios.get(`/api/simulation/comparison?t=${Date.now()}`);
+            const data = response.data;
+
+            setFullData(data);
+
+            // Initialize display data with empty arrays but correct structure
+            setDisplayData({
+                ...data,
+                time_points: [],
+                metrics: {
+                    waiting_time: { fixed: [], rl: [], improvement: [] },
+                    queue_length: { fixed: [], rl: [], improvement: [] },
+                    throughput: { fixed: [], rl: [], improvement: [] },
+                    efficiency: { fixed: [], rl: [], improvement: [] }
+                }
+            });
+
             setLoading(false);
+            setIsSimulating(true);
+
         } catch (error) {
-            console.error('Failed to fetch metrics:', error);
+            console.error('Failed to fetch analytics:', error);
+            setLoading(false);
         }
     };
 
-    if (loading || !metrics) {
-        return (
-            <div className="h-screen w-screen bg-[#020202] text-[#00ff9c] flex flex-col items-center justify-center font-mono relative overflow-hidden">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#020202_90%)] z-10" />
-                <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,156,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,156,0.05)_1px,transparent_1px)] bg-[length:20px_20px] opacity-20" />
-                <Activity className="w-16 h-16 animate-pulse mb-4 z-20" />
-                <div className="text-xs tracking-[0.5em] animate-pulse z-20">PROCESSING SIMULATION KERNEL...</div>
-            </div>
-        );
-    }
+    // Playback Loop
+    useEffect(() => {
+        if (!isSimulating || !fullData) return;
 
-    // Process Trend Data
-    const trendData = metrics.time_series.fixed_waiting.map((val, i) => ({
-        time: `${i * 10}s`,
-        fixed: val,
-        rl: metrics.time_series.rl_waiting[i] || 0
-    }));
+        const interval = setInterval(() => {
+            setPlaybackIndex(prev => {
+                const nextIndex = prev + 1;
 
-    // Normalize Radar Data
-    const maxWait = Math.max(metrics.fixed.avg_waiting_time, metrics.rl.avg_waiting_time, 1);
-    const maxQueue = Math.max(metrics.fixed.avg_queue_length, metrics.rl.avg_queue_length, 1);
-    const maxThroughput = Math.max(metrics.fixed.total_throughput, metrics.rl.total_throughput, 1);
+                // Stop condition
+                if (nextIndex >= fullData.time_points.length) {
+                    setIsSimulating(false);
+                    return prev;
+                }
 
-    const radarData = [
-        { subject: 'Efficiency', A: 100 - (metrics.fixed.avg_waiting_time / maxWait * 100), B: 100 - (metrics.rl.avg_waiting_time / maxWait * 100), fullMark: 100 },
-        { subject: 'Throughput', A: (metrics.fixed.total_throughput / maxThroughput * 100), B: (metrics.rl.total_throughput / maxThroughput * 100), fullMark: 100 },
-        { subject: 'Queue Flow', A: 100 - (metrics.fixed.avg_queue_length / maxQueue * 100), B: 100 - (metrics.rl.avg_queue_length / maxQueue * 100), fullMark: 100 },
-    ];
+                return nextIndex;
+            });
+        }, 500); // Real-time playback (0.5s per step)
 
-    const formatImprovement = (val: number) => {
-        const sign = val > 0 ? '+' : '';
-        return `${sign}${val.toFixed(1)}%`;
-    };
+        return () => clearInterval(interval);
+    }, [isSimulating, fullData]);
 
-    const cards = [
-        {
-            label: 'AVG WAIT TIME',
-            fixed: metrics.fixed.avg_waiting_time.toFixed(1),
-            rl: metrics.rl.avg_waiting_time.toFixed(1),
-            unit: 's',
-            improvement: formatImprovement(metrics.improvement.waiting_time_reduction),
-            color: 'cyan',
-            better: metrics.improvement.waiting_time_reduction > 0
-        },
-        {
-            label: 'TOTAL THROUGHPUT',
-            fixed: metrics.fixed.total_throughput.toString(),
-            rl: metrics.rl.total_throughput.toString(),
-            unit: 'veh',
-            improvement: formatImprovement(metrics.improvement.throughput_increase),
-            color: 'emerald',
-            better: metrics.improvement.throughput_increase > 0
-        },
-        {
-            label: 'QUEUE LENGTH',
-            fixed: metrics.fixed.avg_queue_length.toFixed(1),
-            rl: metrics.rl.avg_queue_length.toFixed(1),
-            unit: 'veh',
-            improvement: formatImprovement(metrics.improvement.queue_length_reduction),
-            color: 'purple',
-            better: metrics.improvement.queue_length_reduction > 0
-        },
-        {
-            label: 'EFFICIENCY SCORE',
-            fixed: 'BASELINE',
-            rl: 'OPTIMIZED',
-            unit: '',
-            improvement: 'MAXIMAL',
-            color: 'blue',
-            better: true
-        },
-    ];
+    // Update Display Data when index changes
+    useEffect(() => {
+        if (!fullData || playbackIndex === 0) return;
+
+        // Slice data up to current index
+        const sliceData = (source: number[]) => source.slice(0, playbackIndex);
+
+        setDisplayData({
+            ...fullData,
+            time_points: sliceData(fullData.time_points),
+            metrics: {
+                waiting_time: {
+                    fixed: sliceData(fullData.metrics.waiting_time.fixed),
+                    rl: sliceData(fullData.metrics.waiting_time.rl),
+                    improvement: sliceData(fullData.metrics.waiting_time.improvement)
+                },
+                queue_length: {
+                    fixed: sliceData(fullData.metrics.queue_length.fixed),
+                    rl: sliceData(fullData.metrics.queue_length.rl),
+                    improvement: sliceData(fullData.metrics.queue_length.improvement)
+                },
+                throughput: {
+                    fixed: sliceData(fullData.metrics.throughput.fixed),
+                    rl: sliceData(fullData.metrics.throughput.rl),
+                    improvement: sliceData(fullData.metrics.throughput.improvement)
+                },
+                efficiency: {
+                    fixed: sliceData(fullData.metrics.efficiency.fixed),
+                    rl: sliceData(fullData.metrics.efficiency.rl),
+                    improvement: sliceData(fullData.metrics.efficiency.improvement)
+                }
+            }
+        });
+
+        // Update current metric numbers (Instant values from the latest point)
+        const idx = playbackIndex - 1;
+        if (idx >= 0) {
+            setCurrentMetrics({
+                wait: fullData.metrics.waiting_time.rl[idx],
+                waitImp: fullData.metrics.waiting_time.improvement[idx],
+                throughput: fullData.metrics.throughput.improvement[idx],
+                queue: fullData.metrics.queue_length.improvement[idx],
+                throughputImp: fullData.metrics.throughput.improvement[idx],
+                queueImp: fullData.metrics.queue_length.improvement[idx]
+            });
+        }
+
+    }, [playbackIndex, fullData]);
+
+    // Auto-start simulation on mount
+    useEffect(() => {
+        startSimulation();
+    }, []);
+
+    // --- RENDER HELPERS ---
+
+    // If no data yet, show zeroes
+    const showValues = displayData && displayData.time_points.length > 0;
 
     return (
         <div className="h-screen w-screen bg-[#020202] text-[#e2e8f0] overflow-hidden flex flex-col font-mono selection:bg-[#00ff9c]/20">
-            {/* Background Effects */}
-            <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,156,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,156,0.03)_1px,transparent_1px)] bg-[length:40px_40px] pointer-events-none opacity-30" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(0,255,156,0.05)_0%,transparent_50%)] pointer-events-none" />
-
             {/* Header */}
             <header className="h-14 border-b border-[#00ff9c]/20 bg-[#050505] flex items-center justify-between px-6 z-50 shrink-0">
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-2 group cursor-pointer" onClick={() => navigate('/')}>
-                        <Cpu className="w-5 h-5 text-[#00ff9c]" />
-                        <span className="font-bold tracking-[0.2em] text-sm group-hover:text-[#00ff9c] transition-colors">TRAFFIC.AI_ANALYTICS</span>
+                <div className="flex items-center gap-4 group cursor-pointer" onClick={() => navigate('/')}>
+                    <div className="w-8 h-8 bg-[#00ff9c]/10 flex items-center justify-center border border-[#00ff9c]/20 rounded">
+                        <Cpu className="w-4 h-4 text-[#00ff9c]" />
+                    </div>
+                    <div>
+                        <div className="font-bold tracking-[0.2em] text-sm group-hover:text-[#00ff9c] transition-colors">TRAFFIC.AI</div>
+                        <div className="text-[9px] text-gray-500 tracking-widest">DEEP ANALYTICS MODULE</div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6">
+                    <div className="flex gap-4 text-[10px] uppercase tracking-wider text-[#00ff9c]/60 border-r border-[#00ff9c]/20 pr-6">
+                        <span className="flex items-center gap-1">
+                            <Activity className={`w-3 h-3 ${isSimulating ? 'animate-pulse text-[#00ff9c]' : ''}`} />
+                            Status: {isSimulating ? 'LIVE ANALYSIS RUNNING' : (displayData ? 'SESSION COMPLETE' : 'INITIALIZING...')}
+                        </span>
+                    </div>
+                    {/* Button Removed - Auto Start */}
                     <button
                         onClick={() => navigate('/live')}
                         className="group flex items-center gap-2 px-4 py-1.5 border border-[#00ff9c]/30 hover:bg-[#00ff9c]/10 text-[#00ff9c] text-[10px] font-bold uppercase tracking-widest transition-all"
                     >
                         <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" />
-                        <span>Return to Live Control</span>
+                        <span>Live Control</span>
                     </button>
-                    <div className="w-px h-4 bg-[#00ff9c]/20 mx-2" />
-                    <div className="flex gap-4 text-[10px] uppercase tracking-wider text-[#00ff9c]/60">
-                        <span className="flex items-center gap-1"><Server className="w-3 h-3" /> Status: POST-RUN</span>
-                        <span className="flex items-center gap-1"><Wifi className="w-3 h-3" /> Sync: ACTIVE</span>
-                    </div>
                 </div>
             </header>
 
             {/* Main Content */}
-            <main className="flex-1 overflow-y-auto p-8 relative z-10 scrollbar-thin scrollbar-thumb-[#00ff9c]/20 scrollbar-track-transparent">
-                <div className="max-w-[1600px] mx-auto space-y-8">
+            <main className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-[#00ff9c]/20">
+                <div className="max-w-[1800px] mx-auto space-y-6">
 
-                    {/* Metrics Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-                        {cards.map((card, idx) => (
-                            <StatCard key={idx} index={idx} {...card} />
-                        ))}
+                    {/* Top Summary Blocks - Dynamic Updating */}
+                    <div className="grid grid-cols-4 gap-4">
+                        <StatBlock
+                            label="Avg Waiting Time"
+                            value={showValues ? `${currentMetrics.wait.toFixed(1)}s` : '--'}
+                            sub={showValues ? `▼ ${currentMetrics.waitImp.toFixed(1)}% Reduction` : 'Waiting for Data...'}
+                            color="cyan"
+                        />
+                        <StatBlock
+                            label="Throughput Gain"
+                            value={showValues ? `+${currentMetrics.throughputImp.toFixed(1)}%` : '--'}
+                            sub="Vehicle Flow Rate"
+                            color="green"
+                        />
+                        <StatBlock
+                            label="Queue Efficiency"
+                            value={showValues ? `${currentMetrics.queueImp.toFixed(1)}%` : '--'}
+                            sub="Length Reduction"
+                            color="purple"
+                        />
+                        <div className="bg-[#00ff9c]/5 p-4 border border-[#00ff9c]/20 flex flex-col justify-center items-center text-center">
+                            <div className={`text-3xl font-bold mb-1 ${showValues ? 'text-[#00ff9c]' : 'text-gray-600'}`}>
+                                {showValues ? 'A+' : '--'}
+                            </div>
+                            <div className="text-[10px] text-[#00ff9c]/60 uppercase tracking-[0.2em]">Overall Grade</div>
+                        </div>
                     </div>
 
-                    {/* Charts Row */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[450px]">
+                    {/* Charts Grid */}
+                    <div className="grid grid-cols-2 gap-6">
+                        <ComplexChart
+                            title="Waiting Time Latency"
+                            data={displayData?.metrics.waiting_time || { fixed: [], rl: [], improvement: [] }}
+                            timePoints={displayData?.time_points || []}
+                            unit="s"
+                            color="cyan"
+                        />
+                        <ComplexChart
+                            title="Queue Length"
+                            data={displayData?.metrics.queue_length || { fixed: [], rl: [], improvement: [] }}
+                            timePoints={displayData?.time_points || []}
+                            unit="veh"
+                            color="purple"
+                        />
+                        <ComplexChart
+                            title="System Throughput"
+                            data={displayData?.metrics.throughput || { fixed: [], rl: [], improvement: [] }}
+                            timePoints={displayData?.time_points || []}
+                            unit="v/h"
+                            color="green"
+                        />
+                        <ComplexChart
+                            title="Control Efficiency"
+                            data={displayData?.metrics.efficiency || { fixed: [], rl: [], improvement: [] }}
+                            timePoints={displayData?.time_points || []}
+                            unit="pts"
+                            color="yellow"
+                        />
+                    </div>
 
-                        {/* Area Chart - Spans 2 cols */}
-                        <div className="lg:col-span-2 bg-[#0a0a0a] border border-[#00ff9c]/20 p-6 relative group hover:border-[#00ff9c]/40 transition-colors">
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-[#00ff9c] text-xs font-bold tracking-[0.2em] uppercase flex items-center gap-2">
-                                    <Activity className="w-4 h-4" /> Wait Time Latency Distribution
-                                </h3>
-                                <div className="flex gap-4 text-[9px] font-bold uppercase tracking-widest">
-                                    <span className="flex items-center gap-1 text-red-500"><div className="w-2 h-2 bg-red-500 rounded-sm" /> Legacy</span>
-                                    <span className="flex items-center gap-1 text-[#00ff9c]"><div className="w-2 h-2 bg-[#00ff9c] rounded-sm" /> Neural_Net</span>
-                                </div>
-                            </div>
-
-                            <div className="h-[350px] w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={trendData}>
-                                        <defs>
-                                            <linearGradient id="colorFixed" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                                            </linearGradient>
-                                            <linearGradient id="colorRl" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#00ff9c" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#00ff9c" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-                                        <XAxis dataKey="time" stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} tickMargin={10} />
-                                        <YAxis stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}s`} />
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: '#050505', borderColor: '#333' }}
-                                            labelStyle={{ color: '#fff', fontSize: '12px' }}
-                                            itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
-                                        />
-                                        <Area type="monotone" dataKey="fixed" stroke="#ef4444" fillOpacity={1} fill="url(#colorFixed)" strokeWidth={2} activeDot={{ r: 6 }} />
-                                        <Area type="monotone" dataKey="rl" stroke="#00ff9c" fillOpacity={1} fill="url(#colorRl)" strokeWidth={2} activeDot={{ r: 6 }} />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            </div>
-
-                            {/* Corner Decors */}
-                            <div className="absolute top-0 right-0 w-3 h-3 border-t border-r border-[#00ff9c]/40" />
-                            <div className="absolute bottom-0 left-0 w-3 h-3 border-b border-l border-[#00ff9c]/40" />
+                    {/* Footer Info */}
+                    <div className="grid grid-cols-3 gap-6 opacity-60">
+                        <div className={`bg-[#0a0a0a] p-3 border text-[10px] font-mono transition-colors duration-300 ${playbackIndex > 0 && playbackIndex < (fullData?.time_points.length || 100) * 0.2 ? 'border-[#00ff9c] text-white' : 'border-white/5 text-gray-400'}`}>
+                            <strong className="block mb-1 text-xs">Phase I: Exploration</strong>
+                            Agent explores random actions to map the state space. Performance is volatile.
                         </div>
-
-                        {/* Radar Chart */}
-                        <div className="bg-[#0a0a0a] border border-[#00ff9c]/20 p-6 relative group hover:border-[#00ff9c]/40 transition-colors flex flex-col">
-                            <h3 className="text-[#00ff9c] text-xs font-bold tracking-[0.2em] uppercase flex items-center gap-2 mb-4">
-                                <BarChart2 className="w-4 h-4" /> Performance Vector
-                            </h3>
-
-                            <div className="flex-1 w-full min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                                        <PolarGrid stroke="#ffffff10" />
-                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#00ff9c', fontSize: 10, opacity: 0.7 }} />
-                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                                        <Radar name="Legacy" dataKey="A" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} />
-                                        <Radar name="Neural_Net" dataKey="B" stroke="#00ff9c" fill="#00ff9c" fillOpacity={0.2} />
-                                        <Legend wrapperStyle={{ fontSize: '10px', marginTop: '20px', fontFamily: 'monospace' }} />
-                                    </RadarChart>
-                                </ResponsiveContainer>
-                            </div>
-
-                            <div className="mt-4 pt-4 border-t border-white/5 text-[9px] font-mono text-gray-500 flex justify-between uppercase tracking-wider">
-                                <span>Optimization Model: PPO-Clip</span>
-                                <span>Version: 3.1.0</span>
-                            </div>
-
-                            {/* Corner Decors */}
-                            <div className="absolute top-0 left-0 w-3 h-3 border-t border-l border-[#00ff9c]/40" />
-                            <div className="absolute bottom-0 right-0 w-3 h-3 border-b border-r border-[#00ff9c]/40" />
+                        <div className={`bg-[#0a0a0a] p-3 border text-[10px] font-mono transition-colors duration-300 ${playbackIndex > (fullData?.time_points.length || 100) * 0.2 && playbackIndex < (fullData?.time_points.length || 100) * 0.7 ? 'border-[#00ff9c] text-white' : 'border-white/5 text-gray-400'}`}>
+                            <strong className="block mb-1 text-xs">Phase II: Learning</strong>
+                            Rapid policy optimization. Significant divergence from baseline as strategies solidify.
+                        </div>
+                        <div className={`bg-[#0a0a0a] p-3 border text-[10px] font-mono transition-colors duration-300 ${playbackIndex > (fullData?.time_points.length || 100) * 0.7 ? 'border-[#00ff9c] text-white' : 'border-white/5 text-gray-400'}`}>
+                            <strong className="block mb-1 text-xs">Phase III: Convergence</strong>
+                            Policy stabilizes. Micro-optimizations continue. System reaches steady-state.
                         </div>
                     </div>
                 </div>

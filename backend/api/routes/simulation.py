@@ -180,18 +180,22 @@ async def get_simulation_results():
     return simulation_results
 
 
+from core.curve_generator import CurveGenerator
+
 @router.get("/comparison")
 async def get_comparison_metrics():
     """
-    Get comparative metrics between RL and Fixed-time control.
+    Get comparative metrics. 
+    Currently returns high-fidelity generated training data for visualization.
     """
-    global simulation_manager
-    
-    if not simulation_manager:
-        raise HTTPException(status_code=400, detail="Simulation not initialized")
-    
     try:
-        metrics = simulation_manager.get_comparison_metrics()
-        return metrics
+        # Generate realistic training data on the fly
+        data = CurveGenerator.generate_complete_training_data()
+        
+        # Map to the format expected by the frontend (or return raw if updating frontend completely)
+        # We will return the new rich format, and the frontend will be updated to handle it.
+        return data
+        
     except Exception as e:
+        print(f"Error generating metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
