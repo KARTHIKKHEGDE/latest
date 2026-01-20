@@ -1,94 +1,187 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ArrowRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowRight, Shield, Lock, Terminal, Activity, Wifi } from 'lucide-react';
 
 const Landing = () => {
     const navigate = useNavigate();
     const [logs, setLogs] = useState<string[]>([]);
+    const [isAuthenticating, setIsAuthenticating] = useState(false);
+    const [authStep, setAuthStep] = useState("");
 
     useEffect(() => {
-        const sequence = [
-            { text: "> initializing neural_network_v4.2... [OK]", delay: 500 },
-            { text: "> establishing sumo_traci_connection... [OK]", delay: 1200 },
-            { text: "> loading city_topology_matrix... [DONE]", delay: 2000 },
-            { text: "> omniscient_sensor_array_online... [READY]", delay: 2800 },
+        const logData = [
+            "> INITIALIZING NEURAL_NETWORK_V4.2...",
+            "> ESTABLISHING SUMO_TRACI_CONNECTION...",
+            "> LOADING CITY_TOPOLOGY_MATRIX...",
+            "> OMNISCIENT_SENSOR_ARRAY_ONLINE...",
+            "> ADAPTIVE_FLOW_PROTOCOL_V2_LOADED",
+            "> HOSMAT_GRID_STRESS_TEST_ENABLED",
+            "> SYNCING_TIME_COORDINATES..."
         ];
 
-        let timeouts: ReturnType<typeof setTimeout>[] = [];
+        let i = 0;
+        const interval = setInterval(() => {
+            setLogs(prev => [logData[i % logData.length], ...prev.slice(0, 5)]);
+            i++;
+        }, 2000);
 
-        sequence.forEach(({ text, delay }) => {
-            const timeout = setTimeout(() => {
-                setLogs(prev => [...prev, text]);
-            }, delay);
-            timeouts.push(timeout);
-        });
-
-        return () => timeouts.forEach(clearTimeout);
+        return () => clearInterval(interval);
     }, []);
 
+    const handleEnter = async () => {
+        setIsAuthenticating(true);
+        const steps = [
+            "INTERSECTION_LOADED",
+            "12_INTERSECTIONS_SYNCED",
+            "BANGALORE_HEBBAL_MAP_LOADED",
+            "BANGALORE_HOSMAT_MAP_LOADED",
+            "DQN_NEURAL_NETWORK_ACTIVATED"
+        ];
+
+        for (const step of steps) {
+            setAuthStep(step);
+            await new Promise(r => setTimeout(r, 400));
+        }
+
+        navigate('/scenarios');
+    };
+
     return (
-        <div className="h-screen w-screen bg-[#050505] text-white overflow-hidden relative font-mono flex flex-col items-center justify-center">
-            {/* Ambient Background */}
-            <div className="absolute inset-0 bg-cyber-grid opacity-20 pointer-events-none" />
-            <div className="absolute inset-0 bg-radial-gradient from-transparent to-[#050505] opacity-80 pointer-events-none" />
+        <div className="h-screen w-screen bg-cyber-layers text-white overflow-hidden relative font-mono flex flex-col items-center justify-center">
+            {/* Background Layers */}
+            <div className="bg-noise absolute inset-0 z-0" />
+            <div className="scan-sweep z-0" />
 
-            {/* System Status Pill */}
-            <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8 }}
-                className="absolute top-24 px-4 py-1.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-500 text-[10px] tracking-[0.2em] uppercase font-bold flex items-center gap-2"
-            >
-                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                System Status: Optimized
-            </motion.div>
-
-            {/* Main Title */}
-            <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 1 }}
-                className="text-center z-10"
-            >
-                <h1 className="text-8xl font-black tracking-tighter mb-4">
-                    TRAFFIC <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 text-shadow-glow">AI</span>
-                </h1>
-                <h2 className="text-gray-500 text-xs tracking-[0.5em] uppercase mb-12">
-                    Next-Generation Adaptive Signal Control Platform
-                </h2>
-
-                {/* Enter Button */}
-                <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => navigate('/scenarios')}
-                    className="group relative px-8 py-3 bg-transparent border border-cyan-500/50 text-cyan-500 hover:bg-cyan-500 hover:text-black transition-all duration-300 uppercase tracking-widest text-sm font-bold flex items-center gap-4 mx-auto"
-                >
-                    Enter System
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </motion.button>
-            </motion.div>
-
-            {/* Console Logs */}
-            <div className="absolute bottom-32 left-0 right-0 flex flex-col items-center gap-2 font-mono text-[10px] text-cyan-500/50">
-                {logs.map((log, i) => (
-                    <motion.div
-                        key={i}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="tracking-wider"
-                    >
-                        {log}
-                    </motion.div>
-                ))}
+            {/* Left Telemetry Rail */}
+            <div className="absolute left-10 top-1/2 -translate-y-1/2 flex flex-col gap-4 text-[11px] text-emerald-400 opacity-90 z-10 pointer-events-none">
+                <div className="flex flex-col">
+                    <span className="text-emerald-900 group-hover:text-emerald-700 transition-colors uppercase font-black text-[9px]">SYS.TIME</span>
+                    <span className="font-bold tracking-widest">{new Date().toLocaleTimeString()}</span>
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-emerald-900 uppercase font-black text-[9px]">MAP.NODES</span>
+                    <span className="font-bold tracking-widest">128</span>
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-emerald-900 uppercase font-black text-[9px]">ACTIVE.LANES</span>
+                    <span className="font-bold tracking-widest">46</span>
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-emerald-900 uppercase font-black text-[9px]">SIGNALS.ONLINE</span>
+                    <span className="font-bold tracking-widest">TRUE</span>
+                </div>
+                <div className="flex flex-col mt-8">
+                    <span className="text-emerald-900 uppercase font-black text-[9px]">SECURITY_LEVEL</span>
+                    <span className="text-red-500 font-bold tracking-[0.2em]">RESTRICTED_ACCESS</span>
+                </div>
             </div>
 
-            {/* Footer Stats */}
-            <div className="absolute bottom-6 right-6 text-right space-y-1 opacity-50">
-                <div className="text-[9px] text-gray-500 uppercase tracking-widest">Reinforcement Learning Powered</div>
-                <div className="text-[9px] text-gray-500 uppercase tracking-widest">Real-time Traffic Optimization</div>
-                <div className="text-[9px] text-gray-500 uppercase tracking-widest">99.9% Collision Prevention</div>
+            {/* Right Telemetry Rail */}
+            <div className="absolute right-10 top-1/2 -translate-y-1/2 flex flex-col gap-6 items-end text-[11px] text-cyan-400 opacity-90 z-10 pointer-events-none text-right">
+                <div className="flex gap-2 items-center">
+                    <span>X_COORDS // 102.339</span>
+                    <Activity className="w-3.5 h-3.5 text-cyan-500" />
+                </div>
+                <div className="flex gap-2 items-center">
+                    <span>Y_COORDS // 442.102</span>
+                    <Wifi className="w-3.5 h-3.5 text-cyan-500" />
+                </div>
+                <div className="flex gap-2 items-center">
+                    <span>Z_COORDS // --0.22</span>
+                    <Terminal className="w-3.5 h-3.5 text-cyan-500" />
+                </div>
+                <div className="mt-12 group">
+                    <div className="border border-cyan-500/20 p-2 transform rotate-45 group-hover:rotate-90 transition-transform duration-1000">
+                        <Lock className="w-4 h-4 transform -rotate-45" />
+                    </div>
+                </div>
+            </div>
+
+            {/* Top Badge */}
+            <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 0.8, scale: 1 }}
+                className="absolute top-12 left-1/2 -translate-x-1/2 z-20 flex items-center gap-4 px-6 py-2 border border-emerald-500/30 bg-black/60 backdrop-blur-md"
+            >
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#00ff9c]" />
+                <span className="text-[10px] tracking-[0.4em] font-bold text-emerald-500">SYSTEM // OPTIMIZED</span>
+            </motion.div>
+
+            {/* Glitch Title */}
+            <motion.div
+                className="text-center z-10 select-none pb-12 cursor-default"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+            >
+                <h1 className="text-[11vw] font-black tracking-tighter leading-none m-0 p-0 text-white">
+                    TRAFFIC <span className="glitch-text text-cyan-400" data-text="AI">AI</span><span className="terminal-cursor text-cyan-400"></span>
+                </h1>
+                <p className="text-gray-600 text-[10px] tracking-[0.8em] uppercase mt-4 opacity-50">
+                    Next-Generation Adaptive Signal Control Platform
+                </p>
+            </motion.div>
+
+            {/* Enter Button */}
+            <div className="z-20 mt-8 relative">
+                <AnimatePresence mode="wait">
+                    {!isAuthenticating ? (
+                        <motion.button
+                            key="enter"
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleEnter}
+                            className="btn-cyber group"
+                        >
+                            <span className="relative z-10 flex items-center gap-4">
+                                &gt; ENTER_SYSTEM
+                                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                            </span>
+                        </motion.button>
+                    ) : (
+                        <motion.div
+                            key="auth"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="flex flex-col items-center gap-4"
+                        >
+                            <div className="w-48 h-1 bg-gray-900 overflow-hidden relative border border-cyan-500/20">
+                                <motion.div
+                                    className="absolute inset-0 bg-cyan-500"
+                                    initial={{ left: "-100%" }}
+                                    animate={{ left: "0%" }}
+                                    transition={{ duration: 1.6, ease: "linear" }}
+                                />
+                            </div>
+                            <span className="text-[10px] text-cyan-400 font-bold tracking-[0.3em] h-4">
+                                {authStep}
+                            </span>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Background Log Stream */}
+            <div className="absolute bottom-8 left-10 z-10 flex flex-col gap-1 w-72 pointer-events-none">
+                <AnimatePresence>
+                    {logs.map((log, i) => (
+                        <motion.div
+                            key={log + i}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 0.8 - (i * 0.12), x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            className="font-mono text-[10px] text-emerald-400 font-bold whitespace-nowrap"
+                        >
+                            {log}
+                        </motion.div>
+                    ))}
+                </AnimatePresence>
+            </div>
+
+            {/* Security Notice */}
+            <div className="absolute bottom-8 right-10 flex items-center gap-4 text-[9px] text-gray-700 opacity-60 z-10">
+                <Shield className="w-4 h-4" />
+                <span className="tracking-[0.2em] font-bold">ENCRYPTION // AES-256 ACTIVE</span>
             </div>
         </div>
     );
