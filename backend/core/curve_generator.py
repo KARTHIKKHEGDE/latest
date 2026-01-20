@@ -7,31 +7,43 @@ class CurveGenerator:
         Simulates increasing congestion over time.
         Fixed-time controller gets worse as traffic builds up.
         """
-        # Random starting waiting time (Low traffic initially)
-        # User Req: First 20s < 20-30s
-        start_wait = np.random.uniform(22, 28)
+        # Map steps to seconds (0.5s per step)
+        seconds = np.linspace(0, steps * 0.5, steps)
         
-        # Random ending waiting time (Heavy congestion)
-        # User Req: Increase till 80-120s
-        end_wait = np.random.uniform(95, 115)
+        # Low traffic initially
+        # User Req: At X=20s, Y should be around 20s and start increasing
+        start_wait = 12.0
+        pivot_wait = 22.0
+        end_wait = np.random.uniform(115, 135)
         
-        # Normalized time
-        t = np.linspace(0, 1, steps)
+        # Progress calculation
+        # 0-15s: Very low traffic (start_wait to ~20)
+        # 15-150s: Aggressive climb to heavy congestion (saturate at end_wait)
         
-        # Non-linear congestion growth
-        # Uses quadratic + linear blend (mimics real traffic buildup)
-        base_curve = start_wait + (end_wait - start_wait) * (0.6 * t + 0.4 * t**2)
+        def calculate_wait(s):
+            if s <= 15:
+                # Linear climb to pivot
+                return start_wait + (pivot_wait - start_wait) * (s / 15.0)
+            elif s <= 150:
+                # Rapid climb to end_wait
+                t_rel = (s - 15) / (150 - 15)
+                return pivot_wait + (end_wait - pivot_wait) * (t_rel ** 0.7)
+            else:
+                # Heavy saturation
+                return end_wait + np.random.uniform(0, 5) # Slight creep upwards
+        
+        base_curve = np.array([calculate_wait(s) for s in seconds])
         
         # Add realistic micro-fluctuations (High Variance)
-        noise = np.random.normal(0, 8.0, steps)  # Increased noise from 2.5 to 8.0
-        # Light smoothing to keep it jagged but readable
+        noise = np.random.normal(0, 6.0, steps)
+        # Smoothing for readability
         smoothed_noise = np.convolve(noise, np.ones(3)/3, mode='same')
         
         # Combine
         fixed_wait = base_curve + smoothed_noise
         
         # Ensure values stay in realistic bounds
-        fixed_wait = np.clip(fixed_wait, start_wait * 0.8, end_wait * 1.1)
+        fixed_wait = np.clip(fixed_wait, 10.0, 150.0)
         
         return fixed_wait
 
@@ -43,7 +55,7 @@ class CurveGenerator:
         """
         # Metric-specific ranges
         ranges = {
-            'waiting_time': {'start': (0.07, 0.15), 'sat': (0.44, 0.67)},   
+            'waiting_time': {'start': (0.05, 0.10), 'sat': (0.35, 0.50)},   # Slightly lower improvement to show RL climb
             'queue_length': {'start': (0.05, 0.12), 'sat': (0.25, 0.33)},   
             'throughput':   {'start': (0.08, 0.14), 'sat': (0.32, 0.39)},   
             'efficiency':   {'start': (0.12, 0.18), 'sat': (0.35, 0.70)}
@@ -62,8 +74,8 @@ class CurveGenerator:
         curve[0] = start_improvement
         
         # TIME-BASED PHASES
-        # User wants saturation in ~2-3 minutes (120-180s)
-        saturation_time = np.random.uniform(140, 190) 
+        # Saturate in ~2 minutes (120s)
+        saturation_time = np.random.uniform(100, 130) 
         
         for i in range(1, steps):
             current_time = i * step_length

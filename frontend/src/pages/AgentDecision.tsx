@@ -10,9 +10,9 @@ interface DecisionLog {
     action: number;
     waiting_time: number;
     queue_length: number;
-    is_emergency?: boolean;
-    emergency_vehicle?: string;
-    preemption_count?: number;
+    type?: 'RL_DECISION' | 'EMERGENCY' | 'EMERGENCY_MAINTAIN' | 'DETECTION';
+    message?: string;
+    vehicle_id?: string;
 }
 
 const AgentDecision = () => {
@@ -25,8 +25,8 @@ const AgentDecision = () => {
         const fetchLogs = async () => {
             try {
                 const response = await axios.get('/api/simulation/decisions');
-                // Only take the last 50 for the narrative stream to keep it snappy
-                setLogs(response.data.slice(0, 50));
+                // Only take the last 100 for more history
+                setLogs(response.data.slice(0, 100));
             } catch (error) {
                 console.error('Failed to fetch decisions:', error);
             } finally {
@@ -47,6 +47,36 @@ const AgentDecision = () => {
             "East-West Left"
         ];
         return descriptions[action] || `Phase Index ${action}`;
+    };
+
+    const renderLogContent = (log: DecisionLog) => {
+        if (log.type === 'EMERGENCY' || log.type === 'EMERGENCY_MAINTAIN') {
+            return (
+                <p className="text-[13px] leading-relaxed text-white/90 font-medium">
+                    <span className="text-[#ff3e3e] font-black uppercase mr-2">[EMERGENCY OVERRIDE]</span>
+                    {log.message || `Emergency vehicle ${log.vehicle_id} prioritized.`}
+                </p>
+            );
+        }
+
+        if (log.type === 'DETECTION') {
+            return (
+                <p className="text-[13px] leading-relaxed text-cyan-400 font-medium italic">
+                    <span className="text-cyan-500 font-black uppercase not-italic mr-2">[SENSOR DETECTION]</span>
+                    {log.message}
+                </p>
+            );
+        }
+
+        // Default RL Decision
+        return (
+            <p className="text-[13px] leading-relaxed text-white/90 font-medium">
+                Agent <span className="text-cyan-400 font-black">{log.tls_id}</span> identified a
+                <span className="text-amber-500 font-black mx-1">Queue Depth of {log.queue_length}</span>.
+                Action: <span className="text-[#00ff9c] font-black uppercase">MADE {getActionDescription(log.action)} SIGNAL GREEN</span>.
+                All other lanes for agent <span className="text-cyan-400 font-bold">{log.tls_id}</span> are now held at <span className="text-[#ff004c] font-black uppercase tracking-tighter">RED_STOP</span>.
+            </p>
+        );
     };
 
     return (
@@ -110,65 +140,66 @@ const AgentDecision = () => {
                             </div>
                         ) : (
                             <div className="flex flex-col gap-3">
-                                {logs.map((log, i) => (
+                                {logs.map((log) => (
                                     <motion.div
                                         initial={{ opacity: 0, y: 20 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ duration: 0.3 }}
-                                        key={`${log.tls_id}-${log.step}-${i}`}
-                                        className="relative group border-l-2 border-[#00ff9c]/30 hover:border-[#00ff9c] bg-white/[0.02] hover:bg-white/[0.04] p-4 transition-all"
+                                        key={`${log.tls_id}-${log.step}-${log.type}-${log.action}-${log.message?.length || 0}`}
+                                        className={`relative group border-l-2 ${log.type === 'EMERGENCY' || log.type === 'EMERGENCY_MAINTAIN'
+                                            ? 'border-[#ff3e3e] bg-[#ff3e3e]/[0.05]'
+                                            : log.type === 'DETECTION'
+                                                ? 'border-cyan-500/50 bg-cyan-500/[0.03]'
+                                                : 'border-[#00ff9c]/30 hover:border-[#00ff9c] bg-white/[0.02] hover:bg-white/[0.04]'
+                                            } p-4 transition-all`}
                                     >
                                         <div className="flex items-start gap-4">
                                             <div className="mt-1">
-                                                <div className="w-8 h-8 rounded bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20 group-hover:scale-110 transition-transform">
-                                                    <Zap className="w-4 h-4 text-cyan-400" />
+                                                <div className={`w-8 h-8 rounded flex items-center justify-center border group-hover:scale-110 transition-transform ${log.type === 'EMERGENCY' || log.type === 'EMERGENCY_MAINTAIN'
+                                                    ? 'bg-[#ff3e3e]/10 border-[#ff3e3e]/20'
+                                                    : log.type === 'DETECTION'
+                                                        ? 'bg-cyan-500/10 border-cyan-500/20'
+                                                        : 'bg-cyan-500/10 border-cyan-500/20'
+                                                    }`}>
+                                                    {log.type === 'EMERGENCY' || log.type === 'EMERGENCY_MAINTAIN' ? (
+                                                        <ShieldAlert className="w-4 h-4 text-[#ff3e3e]" />
+                                                    ) : (
+                                                        <Zap className="w-4 h-4 text-cyan-400" />
+                                                    )}
                                                 </div>
                                             </div>
 
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-3 mb-1">
                                                     <span className="text-[10px] font-black text-white/40 tabular-nums uppercase tracking-widest">
-                                                        Step_{log.step.toString().padStart(5, '0')}
+                                                        {log.step === -1 ? 'LIVE_SCAN' : `Step_${log.step.toString().padStart(5, '0')}`}
                                                     </span>
                                                     <div className="h-px w-8 bg-white/10" />
                                                     <span className="text-[10px] font-black text-cyan-500 uppercase tracking-widest">
                                                         Agent_{log.tls_id}
                                                     </span>
-                                                    {log.queue_length > 10 && (
+                                                    {(log.queue_length ?? 0) > 10 && (
                                                         <span className="text-[8px] bg-[#ffaa00]/10 text-[#ffaa00] px-1.5 py-0.5 border border-[#ffaa00]/20 rounded-full font-black animate-pulse uppercase">
                                                             High_Congestion
                                                         </span>
                                                     )}
                                                 </div>
 
-                                                {log.is_emergency ? (
-                                                    <p className="text-[13px] leading-relaxed text-white/90 font-medium border-l-2 border-[#ff004c] pl-4 bg-[#ff004c]/5 py-2">
-                                                        <span className="text-[#ff004c] font-black uppercase flex items-center gap-2 mb-1">
-                                                            <ShieldAlert className="w-4 h-4" /> EMERGENCY_PREEMPTION_ACTIVE
-                                                        </span>
-                                                        Agent <span className="text-cyan-400 font-bold">{log.tls_id}</span> detected priority vehicle <span className="text-[#ff004c] font-black">{log.emergency_vehicle}</span>.
-                                                        Forcing override: <span className="text-[#00ff9c] font-black uppercase">{getActionDescription(log.action)} set to GREEN</span>.
-                                                        Total successful preemptions: <span className="text-white font-black">{log.preemption_count}</span>.
-                                                    </p>
-                                                ) : (
-                                                    <p className="text-[13px] leading-relaxed text-white/90 font-medium">
-                                                        Agent <span className="text-cyan-400 font-black">{log.tls_id}</span> identified a
-                                                        <span className="text-amber-500 font-black mx-1">Queue Depth of {log.queue_length}</span>.
-                                                        Action: <span className="text-[#00ff9c] font-black uppercase">MADE {getActionDescription(log.action)} SIGNAL GREEN</span>.
-                                                        All other lanes for agent <span className="text-cyan-400 font-bold">{log.tls_id}</span> are now held at <span className="text-[#ff004c] font-black uppercase tracking-tighter">RED_STOP</span>.
-                                                    </p>
-                                                )}
+                                                {renderLogContent(log)}
 
                                                 <div className="mt-3 flex items-center gap-4 text-[9px] font-black uppercase tracking-widest text-white/30">
-                                                    <span className="flex items-center gap-1.5"><Activity className="w-3 h-3" /> {log.is_emergency ? "Priority_Flow" : `Wait: ${log.waiting_time.toFixed(1)}s`}</span>
-                                                    <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Consensus: Confirmed</span>
-                                                    <span className="text-[#ff004c]/60">Conflict_Lanes: Locked_RED</span>
+                                                    <span className="flex items-center gap-1.5"><Activity className="w-3 h-3" /> Wait: {(log.waiting_time ?? 0).toFixed(1)}s</span>
+                                                    <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Consensus: {log.type?.includes('EMERGENCY') ? 'OVERRIDE' : 'CONFIRMED'}</span>
+                                                    <span className="text-[#ff004c]/60">{log.type?.includes('EMERGENCY') ? 'Priority_Active' : 'Conflict_Lanes: Locked_RED'}</span>
                                                 </div>
                                             </div>
                                         </div>
 
                                         {/* Decorative pulse point */}
-                                        <div className="absolute -left-[5px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#00ff9c] shadow-[0_0_8px_#00ff9c] opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        <div className={`absolute -left-[5px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full shadow-[0_0_8px] opacity-0 group-hover:opacity-100 transition-opacity ${log.type === 'EMERGENCY' || log.type === 'EMERGENCY_MAINTAIN'
+                                            ? 'bg-[#ff3e3e] shadow-[#ff3e3e]'
+                                            : 'bg-[#00ff9c] shadow-[#00ff9c]'
+                                            }`} />
                                     </motion.div>
                                 ))}
                             </div>

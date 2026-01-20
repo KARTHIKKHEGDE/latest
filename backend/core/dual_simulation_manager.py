@@ -512,6 +512,7 @@ class DualSimulationManager:
             
             tls_ids = conn.trafficlight.getIDList()
             controllers = []
+            
             for tls_id in tls_ids:
                 if name == "RL":
                     controllers.append(RLAgent(
@@ -529,11 +530,6 @@ class DualSimulationManager:
                         yellow_duration=self.yellow_duration
                     ))
             
-            if name == "RL":
-                self.active_rl_agents = controllers
-            else:
-                self.active_fixed_agents = controllers
-                
             print(f"  Simulating {name}...")
             step = 0
             start_time = time.time()

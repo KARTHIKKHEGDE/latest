@@ -180,7 +180,7 @@ class RLAgent:
         self.queue_length = self._get_queue_length()
         
         # --- EMERGENCY VEHICLE PREEMPTION LOGIC ---
-        has_emergency, emergency_phase_idx, emergency_veh_id = self._check_emergency()
+        has_emergency, emergency_phase_idx, emergency_veh_id = self._check_emergency(simulation_step)
         
         if has_emergency:
             # 🚑 EMERGENCY OVERRIDE - Immediate Priority!
@@ -202,36 +202,43 @@ class RLAgent:
             
             if is_new_emergency:
                 # NEW EMERGENCY DETECTED!
-                print(f"  🚨 [TLS {self.tls_id}] EMERGENCY PREEMPTION!")
-                print(f"     Vehicle: {emergency_veh_id}")
-                
                 self._current_emergency_veh = emergency_veh_id
                 self._emergency_target_phase = physical_phase
                 self._emergency_timer = 0
                 self.emergency_preemptions += 1
                 self.metrics['emergency_preemptions'] += 1
-            
-            # Record narrative log every 10 seconds during emergency to show status
-            if simulation_step % 10 == 0 or is_new_emergency:
-                self.metrics['decisions'].append({
-                    'step': simulation_step,
-                    'action': int(action_idx),
-                    'waiting_time': self.total_waiting_time,
-                    'queue_length': self.queue_length,
-                    'is_emergency': True,
-                    'emergency_vehicle': emergency_veh_id,
-                    'preemption_count': self.emergency_preemptions
-                })
                 
                 # If phase change needed, start yellow transition
                 if physical_phase != self.current_phase:
                     self._set_yellow_phase(self.current_phase)
                     self.metrics['phase_changes'] += 1
-                    print(f"     Switching from phase {self.current_phase} → {physical_phase}")
-                    print(f"     Total preemptions: {self.emergency_preemptions}")
+                    
+                    # Log to website decisions
+                    msg = (
+                        f"EMERGENCY PREEMPTION: Vehicle {emergency_veh_id} approaching. "
+                        f"Switching from phase {self.current_phase} to {physical_phase} (Priority Override)."
+                    )
+                    self.metrics['decisions'].append({
+                        'step': simulation_step,
+                        'type': 'EMERGENCY',
+                        'message': msg,
+                        'vehicle_id': emergency_veh_id,
+                        'action': action_idx,
+                        'waiting_time': self.total_waiting_time,
+                        'queue_length': self.queue_length
+                    })
                 else:
-                    print(f"     Already on correct phase {physical_phase}")
-                    print(f"     Total preemptions: {self.emergency_preemptions}")
+                    # Log even if already on correct phase
+                    msg = f"EMERGENCY PRIORITY: Vehicle {emergency_veh_id} approaching. Maintaining green for requested phase {physical_phase}."
+                    self.metrics['decisions'].append({
+                        'step': simulation_step,
+                        'type': 'EMERGENCY_MAINTAIN',
+                        'message': msg,
+                        'vehicle_id': emergency_veh_id,
+                        'action': action_idx,
+                        'waiting_time': self.total_waiting_time,
+                        'queue_length': self.queue_length
+                    })
             
             # Handle ongoing emergency
             if hasattr(self, '_emergency_target_phase'):
@@ -297,6 +304,7 @@ class RLAgent:
                 
             self.metrics['decisions'].append({
                 'step': simulation_step,
+                'type': 'RL_DECISION',
                 'state': state.tolist(),
                 'action': int(action),
                 'waiting_time': self.total_waiting_time,
@@ -330,7 +338,7 @@ class RLAgent:
             'lane_queues': lane_queues
         }
 
-    def _check_emergency(self) -> Tuple[bool, int, str]:
+    def _check_emergency(self, simulation_step: int) -> Tuple[bool, int, str]:
         """
         Check for emergency vehicles approaching or in incoming lanes.
         Uses 3-tier detection system:
@@ -391,30 +399,24 @@ class RLAgent:
                         
                         # TIER 1: Early Warning (500m)
                         if dist_to_intersection <= EARLY_WARNING_RANGE and veh_id not in self._warned_ambulances:
-                            print(f"  ⚠️  [TLS {self.tls_id}] Early warning: Emergency vehicle approaching")
-                            print(f"     Vehicle: {veh_id}")
-                            print(f"     Distance: {dist_to_intersection:.1f}m")
-                            print(f"     ETA: ~{int(dist_to_intersection / 11):.0f}s (at 40 km/h)")
-                            print(f"     Will need: {phase_name} (Phase {target_phase})")
                             self._warned_ambulances.add(veh_id)
                         
                         # TIER 2: Phase Reservation (200m)
                         if dist_to_intersection <= RESERVATION_RANGE and veh_id not in self._reserved_ambulances:
-                            print(f"  🔔 [TLS {self.tls_id}] Phase reservation: Preparing for emergency")
-                            print(f"     Vehicle: {veh_id}")
-                            print(f"     Distance: {dist_to_intersection:.1f}m")
-                            print(f"     Reserving: {phase_name} (Phase {target_phase})")
                             self._reserved_ambulances.add(veh_id)
                         
                         # TIER 3: Immediate Preemption (100m)
                         if dist_to_intersection <= PREEMPTION_RANGE:
                             # Only log once per ambulance at preemption range
                             if veh_id not in self._logged_ambulances:
-                                print(f"  🚑 [TLS {self.tls_id}] Emergency vehicle detected!")
-                                print(f"     Vehicle: {veh_id}")
-                                print(f"     Lane: {lane_id}")
-                                print(f"     Distance: {dist_to_intersection:.1f}m")
-                                print(f"     Required phase: {phase_name} (Phase {target_phase})")
+                                msg = f"Emergency vehicle {veh_id} detected {dist_to_intersection:.1f}m away. Target phase: {phase_name}."
+                                self.metrics['decisions'].append({
+                                    'step': simulation_step,
+                                    'type': 'DETECTION',
+                                    'message': msg,
+                                    'vehicle_id': veh_id,
+                                    'tls_id': self.tls_id
+                                })
                                 self._logged_ambulances.add(veh_id)
                             
                             return True, target_phase, veh_id
