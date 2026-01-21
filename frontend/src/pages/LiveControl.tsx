@@ -117,7 +117,6 @@ const AINode = ({ agent }: { agent: AgentState }) => {
                 <PhaseRing phase={agent.current_phase} timer={agent.time_since_change} />
                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                     <DigitalText value={(agent.current_phase || 0)} label="Active_Phase" color="text-cyan-400" />
-                    <DigitalText value={typeof agent.throughput === 'number' && !isNaN(agent.throughput) ? agent.throughput : Math.round((agent.time_since_change || 0) * 1.8)} label="Flow_Rate" color="text-[#00ff9c]" />
                     <DigitalText value={isEmergency ? "ALERT" : "STABLE"} label="Sys_State" color={isEmergency ? "text-[#ff004c]" : "text-emerald-500/50"} />
                 </div>
             </div>

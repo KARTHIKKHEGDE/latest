@@ -348,7 +348,7 @@ const DeepAnalytics = () => {
                         <StatBlock
                             label="Throughput Gain"
                             value={showValues ? `+${currentMetrics.throughputImp.toFixed(1)}%` : '--'}
-                            sub="Vehicle Flow Rate"
+                            sub="Traffic Volume"
                             color="green"
                         />
                         <StatBlock
@@ -357,12 +357,7 @@ const DeepAnalytics = () => {
                             sub="Length Reduction"
                             color="purple"
                         />
-                        <div className="bg-[#00ff9c]/5 p-4 border border-[#00ff9c]/20 flex flex-col justify-center items-center text-center">
-                            <div className={`text-3xl font-bold mb-1 ${showValues ? 'text-[#00ff9c]' : 'text-gray-600'}`}>
-                                {showValues ? 'A+' : '--'}
-                            </div>
-                            <div className="text-[10px] text-[#00ff9c]/60 uppercase tracking-[0.2em]">Overall Grade</div>
-                        </div>
+
                     </div>
 
                     {/* Charts Grid */}
